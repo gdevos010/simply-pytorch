@@ -11,6 +11,11 @@ import torch
 
 from simply_pytorch import SGD, Adam, Lion, Muon
 
+# Constants for testing
+GRADIENT_TEST_VALUE = 2.0
+PARAM_POSITIVE_VALUE = 2.0
+PARAM_NEGATIVE_VALUE = -2.0
+
 
 class TestOptimizers:
     """Test suite for Simply PyTorch optimizers."""
@@ -29,7 +34,7 @@ class TestOptimizers:
         loss.backward()
 
         # Check gradient
-        assert param.grad.item() == 2.0
+        assert param.grad.item() == GRADIENT_TEST_VALUE
 
         # Take optimization step
         optimizer.step()
@@ -237,8 +242,8 @@ class TestOptimizers:
 
         # CWD should only apply decay to param[0] where signs align
         # Both will decrease, but param[0] should decrease more due to weight decay
-        assert param[0].item() < 2.0
-        assert param[1].item() < -2.0
+        assert param[0].item() < PARAM_POSITIVE_VALUE
+        assert param[1].item() < PARAM_NEGATIVE_VALUE
 
     def test_optimizer_state_dict_adam(self):
         """Test state_dict save/load for Adam."""
@@ -359,20 +364,20 @@ class TestOptimizers:
         """Test that invalid learning rates raise errors."""
         param = torch.tensor([1.0], requires_grad=True)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid"):
             SGD([param], lr=-0.1)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid"):
             Adam([param], lr=-0.1)
 
     def test_invalid_betas(self):
         """Test that invalid beta values raise errors."""
         param = torch.tensor([1.0], requires_grad=True)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid"):
             Adam([param], lr=0.1, betas=(1.5, 0.999))
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid"):
             Lion([param], lr=0.1, betas=(0.95, -0.1))
 
 

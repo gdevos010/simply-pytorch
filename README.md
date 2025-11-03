@@ -213,41 +213,6 @@ for epoch in range(100):
     scheduler.step()
 ```
 
-### Save and Load
-
-Standard PyTorch state dict interface:
-
-```python
-# Save
-checkpoint = {
-    'model': model.state_dict(),
-    'optimizer': optimizer.state_dict(),
-}
-torch.save(checkpoint, 'checkpoint.pt')
-
-# Load
-checkpoint = torch.load('checkpoint.pt')
-model.load_state_dict(checkpoint['model'])
-optimizer.load_state_dict(checkpoint['optimizer'])
-```
-
-## Testing
-
-Run the test suite:
-
-```bash
-# Install test dependencies
-pip install pytest pytest-xdist
-
-# Run all tests
-pytest tests/ -v
-
-# Run specific test
-pytest tests/test_optimizers.py::TestOptimizers::test_cautious_weight_decay_adam -v
-
-# Run tests in parallel
-pytest tests/ -n auto
-```
 
 ## Examples
 
@@ -257,15 +222,7 @@ Check out `examples/basic_usage.py` for comprehensive examples:
 python examples/basic_usage.py
 ```
 
-This includes:
-
-- Basic usage of all four optimizers
-- Standard weight decay vs Cautious Weight Decay comparison
-- Parameter groups example
-- Training loop examples
-
-
-### 💡 Best Practices
+### Best Practices
 
 1. Start with CWD enabled (`use_cautious_wd=True`)
 2. Use paper's recommended hyperparameters (e.g., `beta2=0.95` for Adam+CWD)

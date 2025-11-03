@@ -16,6 +16,8 @@ from torch.optim.optimizer import Optimizer
 
 from simply_pytorch.utils import newton_schulz_orthogonalize
 
+MIN_PARAM_NDIM = 2
+
 
 class SGD(Optimizer):
     """Stochastic Gradient Descent optimizer.
@@ -40,7 +42,7 @@ class SGD(Optimizer):
 
     def __init__(
         self,
-        params,
+        params: Callable | list,
         lr: float = 1e-3,
         weight_decay: float = 0.0,
         use_cautious_wd: bool = False,
@@ -58,7 +60,7 @@ class SGD(Optimizer):
         super().__init__(params, defaults)
 
     @torch.no_grad()
-    def step(self, closure: Callable | None = None):
+    def step(self, closure: Callable | None = None) -> None:
         """Perform a single optimization step.
 
         Args:
@@ -123,7 +125,7 @@ class Adam(Optimizer):
 
     def __init__(
         self,
-        params,
+        params: Callable | list,
         lr: float = 1e-3,
         betas: tuple = (0.9, 0.999),
         eps: float = 1e-6,
@@ -151,7 +153,7 @@ class Adam(Optimizer):
         super().__init__(params, defaults)
 
     @torch.no_grad()
-    def step(self, closure: Callable | None = None):
+    def step(self, closure: Callable | None = None) -> None:
         """Perform a single optimization step.
 
         Args:
@@ -250,7 +252,7 @@ class Lion(Optimizer):
 
     def __init__(
         self,
-        params,
+        params: Callable | list,
         lr: float = 1e-4,
         betas: tuple = (0.95, 0.98),
         weight_decay: float = 0.0,
@@ -274,7 +276,7 @@ class Lion(Optimizer):
         super().__init__(params, defaults)
 
     @torch.no_grad()
-    def step(self, closure: Callable | None = None):
+    def step(self, closure: Callable | None = None) -> None:
         """Perform a single optimization step.
 
         Args:
@@ -368,7 +370,7 @@ class Muon(Optimizer):
 
     def __init__(
         self,
-        params,
+        params: Callable | list,
         lr: float = 0.02,
         momentum: float = 0.95,
         nesterov: bool = True,
@@ -405,8 +407,51 @@ class Muon(Optimizer):
         }
         super().__init__(params, defaults)
 
+    def _compute_muon_update(
+        self,
+        grad: torch.Tensor,
+        state: dict,
+        group: dict,
+    ) -> torch.Tensor:
+        """Compute Muon optimizer update using Newton-Schulz orthogonalization."""
+        momentum_buffer = state["momentum_buffer"]
+        momentum_buffer.mul_(group["momentum"]).add_(grad)
+
+        if group["nesterov"]:
+            update_input = momentum_buffer * group["momentum"] + grad
+        else:
+            update_input = momentum_buffer
+
+        return newton_schulz_orthogonalize(
+            update_input,
+            num_steps=group["ns_steps"],
+            eps=group["adam_eps"],
+        )
+
+    def _compute_adam_update(
+        self,
+        grad: torch.Tensor,
+        state: dict,
+        adam_beta1: float,
+        adam_beta2: float,
+        group: dict,
+    ) -> torch.Tensor:
+        """Compute Adam optimizer update."""
+        exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
+
+        exp_avg.mul_(adam_beta1).add_(grad, alpha=1 - adam_beta1)
+        exp_avg_sq.mul_(adam_beta2).addcmul_(grad, grad, value=1 - adam_beta2)
+
+        bias_correction1 = 1 - adam_beta1 ** state["step"]
+        bias_correction2 = 1 - adam_beta2 ** state["step"]
+
+        step_size = 1.0 / bias_correction1
+        bias_correction2_sqrt = bias_correction2**0.5
+        denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(group["adam_eps"])
+        return step_size * exp_avg / denom
+
     @torch.no_grad()
-    def step(self, closure: Callable | None = None):
+    def step(self, closure: Callable | None = None) -> None:
         """Perform a single optimization step.
 
         Args:
@@ -431,7 +476,9 @@ class Muon(Optimizer):
                 state = self.state[p]
 
                 # Determine if this parameter should use Muon or Adam
-                use_muon = p.ndim >= 2 and max(p.shape) <= group["dim_threshold"]
+                use_muon = (
+                    p.ndim >= MIN_PARAM_NDIM and max(p.shape) <= group["dim_threshold"]
+                )
 
                 # State initialization (lazy)
                 if len(state) == 0:
@@ -439,67 +486,29 @@ class Muon(Optimizer):
                     state["use_muon"] = use_muon
 
                     if use_muon:
-                        # Muon state: only momentum
                         state["momentum_buffer"] = torch.zeros_like(p.data)
                     else:
-                        # Adam state: first and second moments
                         state["exp_avg"] = torch.zeros_like(p.data)
                         state["exp_avg_sq"] = torch.zeros_like(p.data)
 
                 state["step"] += 1
 
+                # Compute update based on optimizer type
                 if state["use_muon"]:
-                    # Muon update with Newton-Schulz orthogonalization
-                    momentum_buffer = state["momentum_buffer"]
-
-                    # Update momentum
-                    momentum_buffer.mul_(group["momentum"]).add_(grad)
-
-                    # Use Nesterov momentum if specified
-                    if group["nesterov"]:
-                        update_input = momentum_buffer * group["momentum"] + grad
-                    else:
-                        update_input = momentum_buffer
-
-                    # Apply Newton-Schulz orthogonalization
-                    update = newton_schulz_orthogonalize(
-                        update_input,
-                        num_steps=group["ns_steps"],
-                        eps=group["adam_eps"],
-                    )
+                    update = self._compute_muon_update(grad, state, group)
                 else:
-                    # Adam update for non-weight parameters
-                    exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
-
-                    # Update biased first moment estimate
-                    exp_avg.mul_(adam_beta1).add_(grad, alpha=1 - adam_beta1)
-                    # Update biased second raw moment estimate
-                    exp_avg_sq.mul_(adam_beta2).addcmul_(
-                        grad, grad, value=1 - adam_beta2
+                    update = self._compute_adam_update(
+                        grad, state, adam_beta1, adam_beta2, group
                     )
-
-                    # Compute bias-corrected moments
-                    bias_correction1 = 1 - adam_beta1 ** state["step"]
-                    bias_correction2 = 1 - adam_beta2 ** state["step"]
-
-                    # Compute update
-                    step_size = 1.0 / bias_correction1
-                    bias_correction2_sqrt = bias_correction2**0.5
-                    denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(
-                        group["adam_eps"]
-                    )
-                    update = step_size * exp_avg / denom
 
                 # Apply weight decay
                 if group["weight_decay"] != 0:
                     if group["use_cautious_wd"]:
-                        # Cautious Weight Decay: only apply where signs align
                         mask = update * p.data >= 0
                         p.data[mask] -= (
                             group["lr"] * group["weight_decay"] * p.data[mask]
                         )
                     else:
-                        # Standard weight decay
                         p.data.add_(p.data, alpha=-group["lr"] * group["weight_decay"])
 
                 # Update parameters
