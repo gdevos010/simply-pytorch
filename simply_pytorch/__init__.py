@@ -5,7 +5,7 @@ codebase, including support for Cautious Weight Decay (CWD) as described in
 https://arxiv.org/html/2510.12402v1
 """
 
-from simply_pytorch.optimizers import SGD, Adam, Lion, Muon
+from simply_pytorch.optimizers import SGD, Adam, AdamAtan2, Lion, Muon
 
 __version__ = "0.1.0"
-__all__ = ["SGD", "Adam", "Lion", "Muon"]
+__all__ = ["SGD", "Adam", "AdamAtan2", "Lion", "Muon"]

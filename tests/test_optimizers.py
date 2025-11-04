@@ -9,7 +9,7 @@ Reference: /workspace/condor/other/simply/simply/utils/optimizers_test.py
 import pytest
 import torch
 
-from simply_pytorch import SGD, Adam, Lion, Muon
+from simply_pytorch import SGD, Adam, AdamAtan2, Lion, Muon
 
 # Constants for testing
 GRADIENT_TEST_VALUE = 2.0
@@ -80,6 +80,72 @@ class TestOptimizers:
         # update = m_hat / (sqrt(v_hat) + eps) = 2.0 / (2.0 + 1e-6) ≈ 1.0
         # new_param = 1.0 - 1.0 * 1.0 = 0.0
         torch.testing.assert_close(param.item(), 0.0, rtol=1e-4, atol=1e-4)
+
+    def test_adamatan2_basic(self):
+        """Test basic AdamAtan2 functionality with bias correction."""
+        # Create a simple parameter
+        param = torch.tensor([1.0], requires_grad=True)
+        optimizer = AdamAtan2([param], lr=1.0, betas=(0.9, 0.999))
+
+        # Initial state
+        assert param.item() == 1.0
+
+        # Compute gradient
+        loss = param * 2.0
+        loss.backward()
+
+        # Take optimization step
+        optimizer.step()
+
+        # Check state was created
+        assert len(optimizer.state[param]) > 0
+        assert "exp_avg" in optimizer.state[param]
+        assert "exp_avg_sq" in optimizer.state[param]
+        assert optimizer.state[param]["step"] == 1
+
+        # Check momentum values
+        # m = 0.9 * 0 + 0.1 * 2.0 = 0.2
+        torch.testing.assert_close(
+            optimizer.state[param]["exp_avg"].item(), 0.2, rtol=1e-5, atol=1e-5
+        )
+        # v = 0.999 * 0 + 0.001 * 4.0 = 0.004
+        torch.testing.assert_close(
+            optimizer.state[param]["exp_avg_sq"].item(), 0.004, rtol=1e-5, atol=1e-5
+        )
+
+        # Expected update with bias correction and atan2:
+        # m_hat = 0.2 / (1 - 0.9^1) = 0.2 / 0.1 = 2.0
+        # v_hat = 0.004 / (1 - 0.999^1) = 0.004 / 0.001 = 4.0
+        # update = atan2(2.0, sqrt(4.0)) = atan2(2.0, 2.0) = pi/4 ≈ 0.785
+        # new_param = 1.0 - 1.0 * 0.785 = 0.215
+        torch.testing.assert_close(param.item(), 0.215, rtol=1e-2, atol=1e-2)
+
+    def test_adamatan2_scale_invariance(self):
+        """Test that AdamAtan2 is scale invariant with respect to gradients."""
+        # Create two parameters with same initial value
+        param1 = torch.tensor([1.0], requires_grad=True)
+        param2 = torch.tensor([1.0], requires_grad=True)
+
+        optimizer1 = AdamAtan2([param1], lr=0.1, betas=(0.9, 0.999))
+        optimizer2 = AdamAtan2([param2], lr=0.1, betas=(0.9, 0.999))
+
+        # Apply gradients with different scales
+        # The key property: atan2(k*m, sqrt(k^2*v)) = atan2(m, sqrt(v))
+        param1.grad = torch.tensor([1.0])
+        param2.grad = torch.tensor([10.0])  # 10x larger gradient
+
+        optimizer1.step()
+        optimizer2.step()
+
+        # Both should make the same absolute update due to atan2's scale invariance
+        # atan2(0.1*1/0.1, sqrt(0.001*1/0.001)) = atan2(1, 1) = pi/4
+        # atan2(0.1*10/0.1, sqrt(0.001*100/0.001)) = atan2(10, 10) = pi/4
+        # Both updates are pi/4 * 0.1 = 0.0785...
+        update1 = 1.0 - param1.item()
+        update2 = 1.0 - param2.item()
+
+        # The updates should be identical
+        torch.testing.assert_close(update1, update2, rtol=1e-5, atol=1e-5)
 
     def test_lion_basic(self):
         """Test basic Lion functionality."""
@@ -230,6 +296,25 @@ class TestOptimizers:
             f"param[0] change: {change_0}, param[1] change: {change_1}"
         )
 
+    def test_cautious_weight_decay_adamatan2(self):
+        """Test Cautious Weight Decay with AdamAtan2."""
+        param = torch.tensor([2.0, -2.0], requires_grad=True)
+        initial_param = param.data.clone()
+        optimizer = AdamAtan2([param], lr=0.1, weight_decay=0.1, use_cautious_wd=True)
+
+        # Positive gradient (same sign as param[0], opposite to param[1])
+        param.grad = torch.tensor([1.0, 1.0])
+
+        optimizer.step()
+
+        # CWD should only apply decay to param[0] where signs align
+        # param[0] should change more from initial value due to weight decay
+        change_0 = abs(param[0].item() - initial_param[0].item())
+        change_1 = abs(param[1].item() - initial_param[1].item())
+        assert change_0 > change_1, (
+            f"param[0] change: {change_0}, param[1] change: {change_1}"
+        )
+
     def test_cautious_weight_decay_lion(self):
         """Test Cautious Weight Decay with Lion."""
         param = torch.tensor([2.0, -2.0], requires_grad=True)
@@ -316,6 +401,21 @@ class TestOptimizers:
         # Should converge close to 3.0
         torch.testing.assert_close(param.item(), 3.0, rtol=1e-2, atol=1e-2)
 
+    def test_adamatan2_convergence(self):
+        """Test that AdamAtan2 converges on a simple quadratic."""
+        # Minimize f(x) = (x - 3)^2
+        param = torch.tensor([0.0], requires_grad=True)
+        optimizer = AdamAtan2([param], lr=0.1)
+
+        for _ in range(150):
+            optimizer.zero_grad()
+            loss = (param - 3.0) ** 2
+            loss.backward()
+            optimizer.step()
+
+        # Should converge close to 3.0
+        torch.testing.assert_close(param.item(), 3.0, rtol=1e-2, atol=1e-2)
+
     def test_lion_sign_behavior(self):
         """Test that Lion produces sign-based updates."""
         param = torch.tensor([1.0], requires_grad=True)
@@ -370,12 +470,18 @@ class TestOptimizers:
         with pytest.raises(ValueError, match="Invalid"):
             Adam([param], lr=-0.1)
 
+        with pytest.raises(ValueError, match="Invalid"):
+            AdamAtan2([param], lr=-0.1)
+
     def test_invalid_betas(self):
         """Test that invalid beta values raise errors."""
         param = torch.tensor([1.0], requires_grad=True)
 
         with pytest.raises(ValueError, match="Invalid"):
             Adam([param], lr=0.1, betas=(1.5, 0.999))
+
+        with pytest.raises(ValueError, match="Invalid"):
+            AdamAtan2([param], lr=0.1, betas=(1.5, 0.999))
 
         with pytest.raises(ValueError, match="Invalid"):
             Lion([param], lr=0.1, betas=(0.95, -0.1))

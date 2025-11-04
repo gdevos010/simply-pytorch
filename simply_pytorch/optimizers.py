@@ -5,7 +5,7 @@ codebase, including SGD, Adam, Lion, and Muon. All optimizers support both
 standard weight decay and Cautious Weight Decay (CWD) as described in
 https://arxiv.org/html/2510.12402v1
 
-Reference JAX implementation: simply/utils/optimizers.py
+Reference JAX implementation: https://github.com/google-deepmind/simply/blob/main/simply/utils/optimizers.py
 """
 
 from collections.abc import Callable
@@ -316,6 +316,130 @@ class Lion(Optimizer):
                 # Update momentum buffer with beta2 decay applied to m_t
                 # m_{t} ← beta2 * m_{t-1} + (1 - beta2) * m_t
                 exp_avg.mul_(beta2).add_(m_t, alpha=1 - beta2)
+
+                # Apply weight decay
+                if group["weight_decay"] != 0:
+                    if group["use_cautious_wd"]:
+                        # Cautious Weight Decay: only apply where signs align
+                        mask = update * p.data >= 0
+                        p.data[mask] -= (
+                            group["lr"] * group["weight_decay"] * p.data[mask]
+                        )
+                    else:
+                        # Standard weight decay
+                        p.data.add_(p.data, alpha=-group["lr"] * group["weight_decay"])
+
+                # Update parameters
+                p.data.add_(update, alpha=-group["lr"])
+
+        return loss
+
+
+class AdamAtan2(Optimizer):
+    """Adam-atan2 optimizer with scale invariance.
+
+    Adam-atan2 replaces the traditional Adam update rule with atan2 to achieve
+    scale invariance and remove the need for epsilon hyperparameter. This leads
+    to improved numerical stability across different parameter scales.
+
+    Reference: https://github.com/lucidrains/adam-atan2-pytorch
+    Paper: "Scaling Exponents Across Parameterizations and Optimizers" (Everett et al., 2024)
+
+    Args:
+        params: Iterable of parameters to optimize or dicts defining parameter groups
+        lr: Learning rate (default: 1e-4)
+        betas: Coefficients for computing running averages of gradient and its square (default: (0.9, 0.999))
+        weight_decay: Weight decay coefficient (L2 penalty) (default: 0.0)
+        use_cautious_wd: Whether to use Cautious Weight Decay (default: False)
+
+    Example:
+        >>> optimizer = AdamAtan2(model.parameters(), lr=1e-4, weight_decay=1e-3)
+        >>> optimizer.zero_grad()
+        >>> loss.backward()
+        >>> optimizer.step()
+
+    Note:
+        Unlike traditional Adam, this optimizer doesn't require an epsilon parameter
+        for numerical stability, as the atan2 function naturally handles the scale.
+    """
+
+    def __init__(
+        self,
+        params: Callable | list,
+        lr: float = 1e-4,
+        betas: tuple = (0.9, 0.999),
+        weight_decay: float = 0.0,
+        use_cautious_wd: bool = False,
+    ) -> None:
+        if lr < 0.0:
+            raise ValueError(f"Invalid learning rate: {lr}")
+        if not 0.0 <= betas[0] < 1.0:
+            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
+        if not 0.0 <= betas[1] < 1.0:
+            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
+        if weight_decay < 0.0:
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "weight_decay": weight_decay,
+            "use_cautious_wd": use_cautious_wd,
+        }
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self, closure: Callable | None = None) -> None:
+        """Perform a single optimization step.
+
+        Args:
+            closure: A closure that reevaluates the model and returns the loss (optional)
+
+        Returns:
+            Loss value if closure is provided, otherwise None
+        """
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            beta1, beta2 = group["betas"]
+
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+
+                grad = p.grad
+                state = self.state[p]
+
+                # State initialization (lazy)
+                if len(state) == 0:
+                    state["step"] = 0
+                    # Exponential moving average of gradient values
+                    state["exp_avg"] = torch.zeros_like(p.data)
+                    # Exponential moving average of squared gradient values
+                    state["exp_avg_sq"] = torch.zeros_like(p.data)
+
+                exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
+                state["step"] += 1
+
+                # Update biased first moment estimate
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+                # Update biased second raw moment estimate
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+                # Compute bias-corrected first moment estimate
+                bias_correction1 = 1 - beta1 ** state["step"]
+                bias_correction2 = 1 - beta2 ** state["step"]
+
+                # Bias-corrected estimates
+                exp_avg_corrected = exp_avg / bias_correction1
+                exp_avg_sq_corrected = exp_avg_sq / bias_correction2
+
+                # Compute update using atan2 for scale invariance
+                # atan2(y, x) computes arctan(y/x) with correct quadrant handling
+                update = torch.atan2(exp_avg_corrected, exp_avg_sq_corrected.sqrt())
 
                 # Apply weight decay
                 if group["weight_decay"] != 0:

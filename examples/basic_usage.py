@@ -1,6 +1,6 @@
 """Basic usage examples for Simply PyTorch optimizers.
 
-This script demonstrates how to use each optimizer (SGD, Adam, Lion, Muon)
+This script demonstrates how to use each optimizer (SGD, Adam, AdamAtan2, Lion, Muon)
 with both standard and Cautious Weight Decay (CWD).
 """
 
@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch.nn.modules.container import Sequential
 
-from simply_pytorch import SGD, Adam, Lion, Muon
+from simply_pytorch import SGD, Adam, AdamAtan2, Lion, Muon
 
 
 def create_simple_model() -> Sequential:
@@ -125,6 +125,65 @@ def example_adam_with_cwd() -> None:
         print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
 
     print("Adam with CWD completed! Often achieves better generalization.")
+
+
+def example_adamatan2() -> None:
+    """Example: Using AdamAtan2 optimizer."""
+    print("\n=== AdamAtan2 Optimizer ===")
+
+    model = create_simple_model()
+    optimizer = AdamAtan2(
+        model.parameters(),
+        lr=1e-4,  # Typically uses smaller lr than standard Adam
+        betas=(0.9, 0.999),
+        weight_decay=1e-3,
+    )
+
+    # Training loop
+    for epoch in range(3):
+        x = torch.randn(32, 10)
+        y = torch.randint(0, 5, (32,))
+
+        output = model(x)
+        loss = nn.functional.cross_entropy(output, y)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+
+    print("AdamAtan2 uses atan2 for scale invariance - no epsilon needed!")
+
+
+def example_adamatan2_with_cwd() -> None:
+    """Example: Using AdamAtan2 with Cautious Weight Decay."""
+    print("\n=== AdamAtan2 with Cautious Weight Decay ===")
+
+    model = create_simple_model()
+    optimizer = AdamAtan2(
+        model.parameters(),
+        lr=1e-4,
+        betas=(0.9, 0.95),  # Paper recommends beta2=0.95 for CWD
+        weight_decay=1e-3,
+        use_cautious_wd=True,  # Enable CWD
+    )
+
+    # Training loop
+    for epoch in range(3):
+        x = torch.randn(32, 10)
+        y = torch.randint(0, 5, (32,))
+
+        output = model(x)
+        loss = nn.functional.cross_entropy(output, y)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        print(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+
+    print("AdamAtan2 + CWD: Scale invariance + selective regularization!")
 
 
 def example_lion() -> None:
@@ -330,6 +389,8 @@ if __name__ == "__main__":
     example_sgd_with_cwd()
     example_adam()
     example_adam_with_cwd()
+    example_adamatan2()
+    example_adamatan2_with_cwd()
     example_lion()
     example_lion_with_cwd()
     example_muon()

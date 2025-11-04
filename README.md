@@ -4,7 +4,7 @@ PyTorch implementations of optimizers from the [Simply](https://github.com/googl
 
 ## Features
 
-- **Four Optimizers**: SGD, Adam, Lion, and Muon
+- **Five Optimizers**: SGD, Adam, AdamAtan2, Lion, and Muon
 - **Cautious Weight Decay**: Sign-selective weight decay that improves final loss
 - **Drop-in Replacements**: Standard PyTorch `Optimizer` interface
 - **No Extra Hyperparameters**: CWD uses the same λ as standard weight decay
@@ -129,7 +129,41 @@ optimizer = Adam(
 - Standard: `lr=1e-3`, `betas=(0.9, 0.999)`, `weight_decay=1e-3`
 - With CWD: `lr=1e-3`, `betas=(0.9, 0.95)`, `weight_decay=1e-3`, `use_cautious_wd=True`
 
-### 3. Lion
+### 3. AdamAtan2
+
+Adam optimizer with atan2-based updates for improved scale invariance.
+
+```python
+from simply_pytorch import AdamAtan2
+
+optimizer = AdamAtan2(
+    model.parameters(),
+    lr=1e-4,
+    betas=(0.9, 0.999),  # (beta1, beta2)
+    weight_decay=1e-3,
+    use_cautious_wd=False
+)
+```
+
+**Key Features:**
+
+- Uses `atan2(m, sqrt(v))` instead of `m / (sqrt(v) + eps)`
+- No epsilon hyperparameter needed—naturally handles numerical stability
+- Scale invariant: works across different parameter magnitudes
+- From Google DeepMind paper "Scaling Exponents Across Parameterizations and Optimizers"
+
+**Hyperparameter Recommendations:**
+
+- Standard: `lr=1e-4`, `betas=(0.9, 0.999)`, `weight_decay=1e-3`
+- With CWD: `lr=1e-4`, `betas=(0.9, 0.95)`, `weight_decay=1e-3`, `use_cautious_wd=True`
+
+**When to Use:**
+
+- Training with mixed parameter scales
+- When epsilon tuning in Adam is problematic
+- Seeking improved numerical stability without hyperparameter tuning
+
+### 4. Lion
 
 EvoLved Sign Momentum optimizer—memory efficient and powerful.
 
@@ -156,7 +190,7 @@ optimizer = Lion(
 - Standard: `lr=1e-4`, `betas=(0.95, 0.98)`, `weight_decay=0.1`
 - With CWD: `lr=1e-4`, `betas=(0.9, 0.95)`, `weight_decay=0.1`, `use_cautious_wd=True`
 
-### 4. Muon
+### 5. Muon
 
 Hybrid optimizer using Newton-Schulz orthogonalization for weights and Adam for biases.
 
