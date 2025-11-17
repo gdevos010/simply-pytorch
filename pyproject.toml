@@ -12,15 +12,7 @@ authors = [
     {name = "Simply PyTorch Contributors"}
 ]
 classifiers = [
-    "Intended Audience :: Developers",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: Apache Software License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence :: Optimizers",
 ]
 dependencies = [
     "torch>=2.0.0",
@@ -31,14 +23,10 @@ dependencies = [
 Homepage = "https://github.com/gdevos010/simply-pytorch"
 
 [project.optional-dependencies]
-test = [
+dev = [
     "pytest>=7.0.0",
     "pytest-xdist>=3.0.0",
-]
-examples = [
     "torchvision>=0.15.0",
-]
-benchmark = [
     "lightning>=2.0.0",
     "transformers>=4.30.0",
     "datasets>=2.0.0",

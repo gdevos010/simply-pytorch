@@ -7,7 +7,7 @@ Comprehensive benchmark for validating Cautious Weight Decay (CWD) across all Si
 Install the benchmark dependencies:
 
 ```bash
-pip install -e ".[benchmark]"
+pip install -e ".[dev]"
 ```
 
 ## Running the Benchmark
